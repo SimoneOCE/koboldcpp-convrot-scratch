@@ -2,6 +2,12 @@
 // Speed Lab's network volume, replacing the stock CUDA backend cached
 // there. Reuses @aws-sdk/client-s3 already installed for the test site.
 //
+// Uses a multipart upload (via @aws-sdk/lib-storage) instead of a single
+// PutObject - a ~200MB single PUT through RunPod's Cloudflare-fronted S3
+// endpoint hit a 524 (proxy timeout) on a real run. Splitting into 10MB
+// parts keeps each individual request well under that timeout and lets
+// failed parts retry independently instead of restarting the whole upload.
+//
 // Usage:
 //   node upload-convrot-so.js /path/to/koboldcpp_cublas.so
 //
@@ -11,7 +17,8 @@
 require("dotenv").config();
 const fs = require("fs");
 const path = require("path");
-const { S3Client, PutObjectCommand, HeadObjectCommand } = require("@aws-sdk/client-s3");
+const { S3Client, HeadObjectCommand } = require("@aws-sdk/client-s3");
+const { Upload } = require("@aws-sdk/lib-storage");
 
 const {
   RUNPOD_S3_ENDPOINT,
@@ -66,13 +73,27 @@ async function main() {
   }
 
   const body = fs.createReadStream(localPath);
-  await s3.send(new PutObjectCommand({
-    Bucket: RUNPOD_VOLUME_ID,
-    Key: KEY,
-    Body: body,
-    ContentType: "application/octet-stream",
-    ContentLength: stat.size,
-  }));
+  const upload = new Upload({
+    client: s3,
+    params: {
+      Bucket: RUNPOD_VOLUME_ID,
+      Key: KEY,
+      Body: body,
+      ContentType: "application/octet-stream",
+    },
+    partSize: 10 * 1024 * 1024,
+    queueSize: 3,
+  });
+
+  upload.on("httpUploadProgress", (progress) => {
+    if (progress.loaded && progress.total) {
+      const pct = ((progress.loaded / progress.total) * 100).toFixed(1);
+      process.stdout.write(`\rUploaded ${(progress.loaded / 1e6).toFixed(1)} / ${(progress.total / 1e6).toFixed(1)} MB (${pct}%)   `);
+    }
+  });
+
+  await upload.done();
+  process.stdout.write("\n");
 
   const after = await s3.send(new HeadObjectCommand({ Bucket: RUNPOD_VOLUME_ID, Key: KEY }));
   console.log(`Done. Volume now has: ${after.ContentLength} bytes, last modified ${after.LastModified}`);
