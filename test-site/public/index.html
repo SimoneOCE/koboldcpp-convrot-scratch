@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ConvRot Test Site</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 640px; margin: 40px auto; padding: 0 16px; background: #111; color: #eee; }
+  h1 { font-size: 1.3rem; }
+  textarea, input, select { width: 100%; box-sizing: border-box; padding: 8px; margin-top: 4px; margin-bottom: 12px; background: #222; color: #eee; border: 1px solid #444; border-radius: 4px; }
+  label { font-size: 0.85rem; color: #aaa; }
+  .row { display: flex; gap: 12px; }
+  .row > div { flex: 1; }
+  button { padding: 10px 20px; font-size: 1rem; background: #4a7; color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+  button:disabled { background: #555; cursor: default; }
+  #status { margin-top: 16px; font-size: 0.9rem; color: #ccc; white-space: pre-wrap; }
+  video { width: 100%; margin-top: 16px; border-radius: 4px; }
+  a.download { display: inline-block; margin-top: 8px; color: #4a7; }
+</style>
+</head>
+<body>
+  <h1>ConvRot / Kobold Speed Lab test harness</h1>
+  <p style="color:#888; font-size:0.85rem;">Standalone, no auth, no Supabase. Talks straight to the RunPod endpoint configured in the server's .env.</p>
+
+  <label for="prompt">Prompt</label>
+  <textarea id="prompt" rows="3">a cat playing piano, cinematic lighting</textarea>
+
+  <div class="row">
+    <div>
+      <label for="width">Width</label>
+      <input id="width" type="number" value="512" />
+    </div>
+    <div>
+      <label for="height">Height</label>
+      <input id="height" type="number" value="512" />
+    </div>
+  </div>
+
+  <div class="row">
+    <div>
+      <label for="frames">Frames</label>
+      <input id="frames" type="number" value="30" />
+    </div>
+    <div>
+      <label for="fps">FPS</label>
+      <input id="fps" type="number" value="16" />
+    </div>
+    <div>
+      <label for="steps">Steps</label>
+      <input id="steps" type="number" value="20" />
+    </div>
+  </div>
+
+  <button id="generateBtn">Generate</button>
+
+  <div id="status"></div>
+  <video id="video" controls style="display:none;"></video>
+  <a id="downloadLink" class="download" style="display:none;" download>Download video</a>
+
+<script>
+const statusEl = document.getElementById('status');
+const btn = document.getElementById('generateBtn');
+const videoEl = document.getElementById('video');
+const downloadLink = document.getElementById('downloadLink');
+
+function setStatus(text) {
+  statusEl.textContent = text;
+}
+
+async function pollStatus(jobId, startedAt) {
+  const res = await fetch(`/api/status/${jobId}`);
+  const data = await res.json();
+
+  const elapsed = ((Date.now() - startedAt) / 1000).toFixed(1);
+
+  if (data.status === 'COMPLETED') {
+    const videoKey = data.output?.videoKey;
+    if (!videoKey) {
+      setStatus(`Completed but no videoKey in output:\n${JSON.stringify(data.output, null, 2)}`);
+      btn.disabled = false;
+      return;
+    }
+    setStatus(`Done in ${elapsed}s`);
+    const url = `/api/video/${videoKey}`;
+    videoEl.src = url;
+    videoEl.style.display = 'block';
+    downloadLink.href = url;
+    downloadLink.style.display = 'inline-block';
+    btn.disabled = false;
+    return;
+  }
+
+  if (data.status === 'FAILED') {
+    setStatus(`Failed after ${elapsed}s:\n${JSON.stringify(data.output || data.error, null, 2)}`);
+    btn.disabled = false;
+    return;
+  }
+
+  setStatus(`${data.status || 'PENDING'}... (${elapsed}s elapsed)`);
+  setTimeout(() => pollStatus(jobId, startedAt), 3000);
+}
+
+btn.addEventListener('click', async () => {
+  btn.disabled = true;
+  videoEl.style.display = 'none';
+  downloadLink.style.display = 'none';
+  setStatus('Submitting job...');
+
+  const body = {
+    prompt: document.getElementById('prompt').value,
+    width: Number(document.getElementById('width').value),
+    height: Number(document.getElementById('height').value),
+    frames: Number(document.getElementById('frames').value),
+    fps: Number(document.getElementById('fps').value),
+    steps: Number(document.getElementById('steps').value),
+  };
+
+  try {
+    const res = await fetch('/api/generate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      setStatus(`Error: ${data.error}`);
+      btn.disabled = false;
+      return;
+    }
+    setStatus(`Job submitted: ${data.jobId}\nQueued...`);
+    pollStatus(data.jobId, Date.now());
+  } catch (err) {
+    setStatus(`Error: ${err.message}`);
+    btn.disabled = false;
+  }
+});
+</script>
+</body>
+</html>
