@@ -177,19 +177,13 @@ int main(void) {
         float  input[4]  = { 10.0f, -4.0f, 2.0f, 1.0f };
         failures += run_case(backend, "no-rotation", 4, 2, 1, weight, input, 0, NULL, NULL);
     }
-    {
-        int8_t weight[8] = { 1, 2, 3, 4,   -1, 0, 5, -2 };
-        float  input[4]  = { 10.0f, -4.0f, 2.0f, 1.0f };
-        failures += run_case(backend, "rotation-single-group", 4, 2, 1, weight, input, 4, NULL, NULL);
-    }
-    {
-        int8_t weight[8] = { 3, -1, 2, 0, 1, 4, -2, 1 };
-        float input[16] = {
-            5.0f, -3.0f, 1.0f, 2.0f,   -1.0f, 6.0f, 0.5f, -2.0f,
-            -4.0f, 2.0f, 3.0f, -1.0f,   0.0f, -2.0f, 5.0f, 1.0f,
-        };
-        failures += run_case(backend, "rotation-two-groups-multirow", 8, 1, 2, weight, input, 4, NULL, NULL);
-    }
+    // NOTE: the small hand-picked group_size=4 rotation cases from the CPU
+    // test are dropped here on purpose - ggml-cuda.cu's own kernel hard-
+    // enforces GGML_ASSERT(convrot_group_size == 0 || convrot_group_size ==
+    // 256), unlike the CPU path which accepts any power-of-4 group size.
+    // Rotation correctness on CUDA is covered by the group256-random case
+    // below instead, which uses the one group size the kernel actually
+    // supports.
     {
         int8_t weight[4] = { 1, 2, 3, 4 };
         float input[4] = { 0.0f, 0.0f, 0.0f, 0.0f };
@@ -200,7 +194,7 @@ int main(void) {
         float  input[4]  = { 10.0f, -4.0f, 2.0f, 1.0f };
         float  weight_scale[2] = { 0.037f, 1.245f };
         float  bias[2] = { 0.5f, -3.25f };
-        failures += run_case(backend, "weight_scale-and-bias", 4, 2, 1, weight, input, 4, weight_scale, bias);
+        failures += run_case(backend, "weight_scale-and-bias", 4, 2, 1, weight, input, 0, weight_scale, bias);
     }
     // Case: group_size=256, matching the real production-shaped group size
     // (the only value the CUDA kernel actually accepts, per ggml-cuda.cu's
