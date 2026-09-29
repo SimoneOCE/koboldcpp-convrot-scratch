@@ -54,6 +54,13 @@ const KEYS_TO_DELETE = [
   "minimax_h3_fl2va_int8_convrot.safetensors",
   "minimax_h3_fl2va_int8_convrot.safetensors.aria2",
   "minimax_h3_fl2va_int8_convrot.safetensors.aria2__temp",
+  // koboldcpp.py caches the --config file locally in its cwd (the volume)
+  // the first time it fetches the URL, then reuses that local copy on
+  // every later run instead of re-fetching - confirmed via its
+  // LastModified timestamp matching the very first-ever run, long before
+  // any of our sdmodel/sdoffloadcpu pushes. Every push since then was
+  // silently ignored until this file is gone.
+  "DasiwaMinimaxH3-convrot.kcppt",
 ];
 
 async function deleteWithRetry(key, attempts = 3) {
