@@ -41,10 +41,11 @@ async function main() {
   const rows = [];
 
   do {
-    const resp = await s3.send(new ListObjectsV2Command({
-      Bucket: RUNPOD_VOLUME_ID,
-      ContinuationToken: continuationToken,
-    }));
+    const params = { Bucket: RUNPOD_VOLUME_ID, Prefix: "" };
+    if (continuationToken) {
+      params.ContinuationToken = continuationToken;
+    }
+    const resp = await s3.send(new ListObjectsV2Command(params));
     for (const obj of resp.Contents || []) {
       total += obj.Size;
       rows.push(obj);
