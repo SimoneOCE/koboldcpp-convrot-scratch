@@ -57,6 +57,15 @@
   <video id="video" controls style="display:none;"></video>
   <a id="downloadLink" class="download" style="display:none;" download>Download video</a>
 
+  <hr style="margin-top:32px; border-color:#333;" />
+  <h1 style="font-size:1rem;">Already ran a job elsewhere? (dashboard / raw JSON)</h1>
+  <p style="color:#888; font-size:0.85rem;">Paste the RunPod job ID (from the dashboard response), or the videoKey directly if you already have it.</p>
+  <input id="lookupInput" type="text" placeholder="job id or videoKey (e.g. 1234-....mp4)" />
+  <button id="lookupBtn">Load</button>
+  <div id="lookupStatus" style="margin-top:12px; font-size:0.9rem; color:#ccc; white-space:pre-wrap;"></div>
+  <video id="lookupVideo" controls style="display:none;"></video>
+  <a id="lookupDownload" class="download" style="display:none;" download>Download video</a>
+
 <script>
 const statusEl = document.getElementById('status');
 const btn = document.getElementById('generateBtn');
@@ -133,6 +142,73 @@ btn.addEventListener('click', async () => {
     setStatus(`Error: ${err.message}`);
     btn.disabled = false;
   }
+});
+
+const lookupInput = document.getElementById('lookupInput');
+const lookupBtn = document.getElementById('lookupBtn');
+const lookupStatusEl = document.getElementById('lookupStatus');
+const lookupVideo = document.getElementById('lookupVideo');
+const lookupDownload = document.getElementById('lookupDownload');
+
+const VIDEO_KEY_RE = /^[a-f0-9-]{36}\.(gif|mp4|png|webp|avi)$/i;
+
+function showLookupVideo(videoKey) {
+  const url = `/api/video/${videoKey}`;
+  lookupVideo.src = url;
+  lookupVideo.style.display = 'block';
+  lookupDownload.href = url;
+  lookupDownload.style.display = 'inline-block';
+}
+
+lookupBtn.addEventListener('click', async () => {
+  const value = lookupInput.value.trim();
+  if (!value) return;
+
+  lookupBtn.disabled = true;
+  lookupVideo.style.display = 'none';
+  lookupDownload.style.display = 'none';
+  lookupStatusEl.textContent = 'Looking up...';
+
+  try {
+    // If it already looks like a videoKey, skip straight to fetching it.
+    if (VIDEO_KEY_RE.test(value)) {
+      lookupStatusEl.textContent = 'Loading video...';
+      showLookupVideo(value);
+      lookupStatusEl.textContent = 'Loaded.';
+      lookupBtn.disabled = false;
+      return;
+    }
+
+    // Otherwise treat it as a RunPod job ID and check its status.
+    const res = await fetch(`/api/status/${value}`);
+    const data = await res.json();
+
+    if (!res.ok || data.error) {
+      lookupStatusEl.textContent = `Error: ${data.error || res.status}`;
+      lookupBtn.disabled = false;
+      return;
+    }
+
+    if (data.status !== 'COMPLETED') {
+      lookupStatusEl.textContent = `Job status: ${data.status || 'unknown'} - not done yet, try again shortly.`;
+      lookupBtn.disabled = false;
+      return;
+    }
+
+    const videoKey = data.output?.videoKey;
+    if (!videoKey) {
+      lookupStatusEl.textContent = `Completed but no videoKey in output:\n${JSON.stringify(data.output, null, 2)}`;
+      lookupBtn.disabled = false;
+      return;
+    }
+
+    lookupStatusEl.textContent = 'Loading video...';
+    showLookupVideo(videoKey);
+    lookupStatusEl.textContent = 'Loaded.';
+  } catch (err) {
+    lookupStatusEl.textContent = `Error: ${err.message}`;
+  }
+  lookupBtn.disabled = false;
 });
 </script>
 </body>
