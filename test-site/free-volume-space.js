@@ -56,18 +56,31 @@ const KEYS_TO_DELETE = [
   "minimax_h3_fl2va_int8_convrot.safetensors.aria2__temp",
 ];
 
+async function deleteWithRetry(key, attempts = 3) {
+  for (let i = 1; i <= attempts; i++) {
+    try {
+      await s3.send(new DeleteObjectCommand({ Bucket: RUNPOD_VOLUME_ID, Key: key }));
+      return true;
+    } catch (err) {
+      console.error(`  attempt ${i}/${attempts} failed - name: ${err.name}, message: ${err.message}, httpStatusCode: ${err.$metadata?.httpStatusCode}, requestId: ${err.$metadata?.requestId}`);
+      if (i === attempts) throw err;
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  }
+}
+
 async function main() {
   for (const key of KEYS_TO_DELETE) {
     try {
       const head = await s3.send(new HeadObjectCommand({ Bucket: RUNPOD_VOLUME_ID, Key: key }));
       console.log(`Deleting ${key} (${(head.ContentLength / 1e9).toFixed(2)} GB)...`);
-      await s3.send(new DeleteObjectCommand({ Bucket: RUNPOD_VOLUME_ID, Key: key }));
+      await deleteWithRetry(key);
       console.log(`  done.`);
     } catch (err) {
       if (err.name === "NotFound" || err.$metadata?.httpStatusCode === 404) {
         console.log(`Skipping ${key} - not found (already gone).`);
       } else {
-        console.error(`Failed on ${key}:`, err.message);
+        console.error(`Gave up on ${key} after retries.`);
       }
     }
   }
