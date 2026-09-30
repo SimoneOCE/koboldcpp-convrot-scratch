@@ -450,12 +450,31 @@ static bool ggml_backend_cpu_device_supports_op(ggml_backend_dev_t dev, const st
                 op->type != GGML_TYPE_IQ2_S   &&
                 op->type != GGML_TYPE_IQ1_S   &&
                 op->type != GGML_TYPE_IQ1_M; // missing type_traits.from_float
-        case GGML_OP_MUL_MAT:
+        case GGML_OP_MUL_MAT: {
             if (ggml_get_op_params_i32(op, 1) == GGML_HINT_SRC0_IS_HADAMARD &&
                 src0->type == GGML_TYPE_F32 && op->type == GGML_TYPE_F32) {
                 return src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_F16;
             }
-            return src1->type == GGML_TYPE_F32 || src1->type == ggml_get_type_traits_cpu(src0->type)->vec_dot_type;
+            bool result = src1->type == GGML_TYPE_F32 || src1->type == ggml_get_type_traits_cpu(src0->type)->vec_dot_type;
+            // CONVROT_DEBUG_SCALES: unconditional - this is a capability
+            // query (does the CPU backend accept this MUL_MAT node?), run
+            // during graph scheduling, not during compute. If it returns
+            // false for the ConvRot I8 case, the scheduler's response to
+            // that (silently skip prequantization? something else?) is
+            // exactly what three prior black-frame test rounds couldn't
+            // explain since ggml_compute_forward_mul_mat_i8_f32 itself
+            // never printed anything.
+            if (src0->type == GGML_TYPE_I8) {
+                static int i8_supports_prints_remaining = 6;
+                if (i8_supports_prints_remaining > 0) {
+                    i8_supports_prints_remaining--;
+                    printf("[convrot-debug-supports] MUL_MAT src0_type=I8 src1_type=%d vec_dot_type=%d -> supports_op=%d\n",
+                           (int)src1->type, (int)ggml_get_type_traits_cpu(src0->type)->vec_dot_type, (int)result);
+                    fflush(stdout);
+                }
+            }
+            return result;
+        }
         case GGML_OP_SOFT_MAX_BACK: {
             if (op->src[0]->type != GGML_TYPE_F32 || op->src[1]->type != GGML_TYPE_F32) {
                 return false;

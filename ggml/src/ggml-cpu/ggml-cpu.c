@@ -1196,6 +1196,21 @@ static void ggml_compute_forward_mul_mat_i8_f32(
     const struct ggml_tensor * src0 = dst->src[0];
     const struct ggml_tensor * src1 = dst->src[1];
 
+    // CONVROT_DEBUG_SCALES: unconditional entry marker, no env-var gate and
+    // no call-limit static state - three prior test rounds got zero output
+    // from the gated diagnostic further down this function, so this proves
+    // (or disproves) whether this function is even reached at all, before
+    // trusting anything past this point.
+    {
+        static int entry_prints_remaining = 3;
+        if (entry_prints_remaining > 0 && params->ith == 0) {
+            entry_prints_remaining--;
+            printf("[convrot-debug-entry] ggml_compute_forward_mul_mat_i8_f32 ENTERED, src0_type=%d src1_type=%d dst_type=%d\n",
+                   (int)src0->type, (int)src1->type, (int)dst->type);
+            fflush(stdout);
+        }
+    }
+
     GGML_ASSERT(src0->type == GGML_TYPE_I8);
     GGML_ASSERT(src1->type == GGML_TYPE_F32 || src1->type == GGML_TYPE_I8);
     GGML_ASSERT(dst->type == GGML_TYPE_F32);
