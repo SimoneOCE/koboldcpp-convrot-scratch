@@ -1220,6 +1220,43 @@ static void ggml_compute_forward_mul_mat_i8_f32(
     GGML_ASSERT(convrot_group_size == 0 || (convrot_group_size <= 256 && k % convrot_group_size == 0));
     GGML_ASSERT(prequantized || params->wsize >= scale_offset + (size_t)rows * sizeof(float));
 
+    // CONVROT_DEBUG_SCALES: one-off diagnostic for the black-frame-output
+    // bug. This is the CPU-backend equivalent of ggml_cuda_mul_mat_i8 -
+    // with sdoffloadcpu on, the scheduler routes this op here instead of
+    // to CUDA, which is why instrumenting only the CUDA copy produced no
+    // output across two full test runs. Only params->ith==0 prints, so
+    // this isn't repeated once per thread.
+    {
+        static int debug_calls_remaining = -1;
+        if (debug_calls_remaining == -1) {
+            debug_calls_remaining = getenv("CONVROT_DEBUG_SCALES") != NULL ? 6 : 0;
+        }
+        if (debug_calls_remaining > 0 && params->ith == 0) {
+            debug_calls_remaining--;
+            const float * ws = dst->src[2] != NULL ? (const float *)dst->src[2]->data : NULL;
+            const float * bs = dst->src[3] != NULL ? (const float *)dst->src[3]->data : NULL;
+            printf("[convrot-debug-cpu] mul_mat_i8 call, k=%lld n=%lld rows=%lld prequantized=%d group=%d\n",
+                   (long long)k, (long long)n, (long long)rows, (int)prequantized, convrot_group_size);
+            if (ws == NULL) {
+                printf("[convrot-debug-cpu] weight_scales: NULL\n");
+            } else {
+                printf("[convrot-debug-cpu] weight_scales: ptr=%p vals=[%f, %f, %f, %f]\n",
+                       (const void *)ws, ws[0], n > 1 ? ws[1] : 0, n > 2 ? ws[2] : 0, n > 3 ? ws[3] : 0);
+            }
+            if (bs == NULL) {
+                printf("[convrot-debug-cpu] bias: NULL\n");
+            } else {
+                printf("[convrot-debug-cpu] bias: ptr=%p vals=[%f, %f, %f, %f]\n",
+                       (const void *)bs, bs[0], n > 1 ? bs[1] : 0, n > 2 ? bs[2] : 0, n > 3 ? bs[3] : 0);
+            }
+            printf("[convrot-debug-cpu] src0 (weight) data ptr=%p first bytes=[%d, %d, %d, %d]\n",
+                   (const void *)src0->data,
+                   ((const int8_t *)src0->data)[0], ((const int8_t *)src0->data)[1],
+                   ((const int8_t *)src0->data)[2], ((const int8_t *)src0->data)[3]);
+            fflush(stdout);
+        }
+    }
+
     int8_t * qdata = prequantized ? (int8_t *)src1->data : (int8_t *)params->wdata;
     float * scales = prequantized ? NULL : (float *)((char *)params->wdata + scale_offset);
     const float * packed_scales = prequantized
