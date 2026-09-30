@@ -2227,6 +2227,66 @@ static void ggml_cuda_mul_mat_i8(
 
     const float * weight_scales = dst->src[2] != nullptr ? (const float *)dst->src[2]->data : nullptr;
     const float * bias          = dst->src[3] != nullptr ? (const float *)dst->src[3]->data : nullptr;
+
+    // CONVROT_DEBUG_SCALES: one-off diagnostic for the black-frame-output
+    // bug. Dumps where weight_scales/bias actually point and what they
+    // actually hold, right before the cublasGemmEx call that consumes
+    // them - printed for only the first few calls so a real model (with
+    // thousands of Linear layers per step) doesn't flood the log. See the
+    // session notes on why this specific pair of tensors is the leading
+    // suspect: they're the one piece of ConvRot-specific state staged
+    // separately from the main INT8 weight tensor under CPU offload.
+    {
+        static int debug_calls_remaining = getenv("CONVROT_DEBUG_SCALES") != nullptr ? 6 : 0;
+        if (debug_calls_remaining > 0) {
+            debug_calls_remaining--;
+            auto describe_ptr = [](const char * label, const void * ptr) {
+                if (ptr == nullptr) {
+                    printf("[convrot-debug] %s: NULL\n", label);
+                    return;
+                }
+                cudaPointerAttributes attrs;
+                cudaError_t err = cudaPointerGetAttributes(&attrs, ptr);
+                float host_vals[4] = {0, 0, 0, 0};
+                if (err != cudaSuccess) {
+                    // Unregistered host memory (plain malloc, e.g. the
+                    // GGML_CUDA_NO_PINNED fallback) makes
+                    // cudaPointerGetAttributes itself fail - that failure
+                    // IS the diagnostic. Clear the sticky CUDA error so it
+                    // doesn't get misattributed to the next real CUDA call.
+                    printf("[convrot-debug] %s: ptr=%p cudaPointerGetAttributes FAILED (%s) - likely plain/unregistered host memory\n",
+                           label, ptr, cudaGetErrorString(err));
+                    (void)cudaGetLastError();
+                    memcpy(host_vals, ptr, sizeof(host_vals));
+                    printf("[convrot-debug] %s: read directly as host ptr -> [%f, %f, %f, %f]\n",
+                           label, host_vals[0], host_vals[1], host_vals[2], host_vals[3]);
+                    return;
+                }
+                const char * kind = attrs.type == cudaMemoryTypeDevice ? "DEVICE"
+                                  : attrs.type == cudaMemoryTypeHost   ? "PINNED_HOST"
+                                  : attrs.type == cudaMemoryTypeManaged ? "MANAGED"
+                                  : "UNREGISTERED";
+                printf("[convrot-debug] %s: ptr=%p type=%s device=%d\n", label, ptr, kind, attrs.device);
+                if (attrs.type == cudaMemoryTypeDevice) {
+                    cudaError_t cpy_err = cudaMemcpy(host_vals, ptr, sizeof(host_vals), cudaMemcpyDeviceToHost);
+                    printf("[convrot-debug] %s: cudaMemcpy D2H %s -> [%f, %f, %f, %f]\n",
+                           label, cpy_err == cudaSuccess ? "OK" : cudaGetErrorString(cpy_err),
+                           host_vals[0], host_vals[1], host_vals[2], host_vals[3]);
+                } else {
+                    memcpy(host_vals, ptr, sizeof(host_vals));
+                    printf("[convrot-debug] %s: host-readable -> [%f, %f, %f, %f]\n",
+                           label, host_vals[0], host_vals[1], host_vals[2], host_vals[3]);
+                }
+            };
+            printf("[convrot-debug] === mul_mat_i8 call, n=%lld rows=%lld k=%lld ===\n",
+                   (long long)n, (long long)rows, (long long)k);
+            describe_ptr("weight_scales (dst->src[2])", weight_scales);
+            describe_ptr("bias (dst->src[3])", bias);
+            describe_ptr("src0 weight data", src0->data);
+            fflush(stdout);
+        }
+    }
+
     ggml_cuda_pool_alloc<int32_t> accum(ctx.pool(), (size_t)n * rows_padded);
 
     const int32_t alpha = 1;
